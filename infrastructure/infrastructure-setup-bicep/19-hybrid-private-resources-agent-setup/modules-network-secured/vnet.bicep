@@ -56,7 +56,7 @@ var vnetAddress = empty(vnetAddressPrefix) ? defaultVnetAddressPrefix : vnetAddr
 var agentSubnet = empty(agentSubnetPrefix) ? cidrSubnet(vnetAddress, 24, 0) : agentSubnetPrefix
 var peSubnet = empty(peSubnetPrefix) ? cidrSubnet(vnetAddress, 24, 1) : peSubnetPrefix
 var mcpSubnet = empty(mcpSubnetPrefix) ? cidrSubnet(vnetAddress, 24, 2) : mcpSubnetPrefix
-var containerAppsSubnet = empty(containerAppsSubnetPrefix) ? cidrSubnet(vnetAddress, 23, 1) : containerAppsSubnetPrefix
+var containerAppsSubnet = empty(containerAppsSubnetPrefix) ? cidrSubnet(vnetAddress, 24, 4) : containerAppsSubnetPrefix
 
 resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: vnetName

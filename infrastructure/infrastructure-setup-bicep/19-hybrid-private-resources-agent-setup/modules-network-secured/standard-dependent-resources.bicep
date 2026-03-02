@@ -146,3 +146,24 @@ output cosmosDBId string = cosmosDBExists ? existingCosmosDB.id : cosmosDB.id
 output cosmosDBResourceGroupName string = cosmosDBExists ? cosmosParts[4] : resourceGroup().name
 output cosmosDBSubscriptionId string = cosmosDBExists ? cosmosParts[2] : subscription().subscriptionId
 // output keyvaultId string = keyVault.id
+
+// ---- Azure Container Registry (Premium SKU for private endpoints) ----
+
+@description('Name of the Azure Container Registry')
+param containerRegistryName string
+
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+  name: containerRegistryName
+  location: location
+  sku: {
+    name: 'Premium'
+  }
+  properties: {
+    adminUserEnabled: false
+    publicNetworkAccess: 'Disabled'
+    networkRuleBypassOptions: 'AzureServices'
+  }
+}
+
+output containerRegistryName string = containerRegistry.name
+output containerRegistryId string = containerRegistry.id

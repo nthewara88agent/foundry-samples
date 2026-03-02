@@ -22,6 +22,9 @@ param peSubnetName string = 'pe-subnet'
 @description('The name of MCP subnet for user-deployed Container Apps')
 param mcpSubnetName string = 'mcp-subnet'
 
+@description('The name of Container Apps Environment subnet')
+param containerAppsSubnetName string = 'container-apps-subnet'
+
 @description('Address space for the VNet (only used for new VNet)')
 param vnetAddressPrefix string = ''
 
@@ -33,6 +36,9 @@ param peSubnetPrefix string = ''
 
 @description('Address prefix for the MCP subnet')
 param mcpSubnetPrefix string = ''
+
+@description('Address prefix for the Container Apps subnet (minimum /23)')
+param containerAppsSubnetPrefix string = ''
 
 @description('Route table resource ID to attach to agent and mcp subnets (optional)')
 param routeTableId string = ''
@@ -46,10 +52,12 @@ module newVNet 'vnet.bicep' = if (!useExistingVnet) {
     agentSubnetName: agentSubnetName
     peSubnetName: peSubnetName
     mcpSubnetName: mcpSubnetName
+    containerAppsSubnetName: containerAppsSubnetName
     vnetAddressPrefix: vnetAddressPrefix
     agentSubnetPrefix: agentSubnetPrefix
     peSubnetPrefix: peSubnetPrefix
     mcpSubnetPrefix: mcpSubnetPrefix
+    containerAppsSubnetPrefix: containerAppsSubnetPrefix
     routeTableId: routeTableId
   }
 }
@@ -86,6 +94,10 @@ output virtualNetworkResourceGroup string = useExistingVnet
 output agentSubnetName string = agentSubnetName
 output peSubnetName string = peSubnetName
 output mcpSubnetName string = mcpSubnetName
+output containerAppsSubnetName string = containerAppsSubnetName
 output agentSubnetId string = useExistingVnet ? existingVNet.outputs.agentSubnetId : newVNet.outputs.agentSubnetId
 output peSubnetId string = useExistingVnet ? existingVNet.outputs.peSubnetId : newVNet.outputs.peSubnetId
 output mcpSubnetId string = useExistingVnet ? existingVNet.outputs.mcpSubnetId : newVNet.outputs.mcpSubnetId
+output containerAppsSubnetId string = useExistingVnet
+  ? '${existingVNet.outputs.virtualNetworkId}/subnets/${containerAppsSubnetName}'
+  : newVNet.outputs.containerAppsSubnetId

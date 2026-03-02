@@ -105,6 +105,12 @@ param peSubnetPrefix string = ''
 @description('Address prefix for the MCP subnet. The default value is 192.168.2.0/24.')
 param mcpSubnetPrefix string = ''
 
+@description('The name of Container Apps Environment subnet')
+param containerAppsSubnetName string = 'container-apps-subnet'
+
+@description('Address prefix for the Container Apps subnet (minimum /23)')
+param containerAppsSubnetPrefix string = ''
+
 @description('The AI Search Service full ARM Resource ID. This is an optional field, and if not provided, the resource will be created.')
 param aiSearchResourceId string = ''
 @description('The AI Storage Account full ARM Resource ID. This is an optional field, and if not provided, the resource will be created.')
@@ -145,6 +151,7 @@ var projectName = toLower('${firstProjectName}${uniqueSuffix}')
 var cosmosDBName = toLower('${aiServices}${uniqueSuffix}cosmosdb')
 var aiSearchName = toLower('${aiServices}${uniqueSuffix}search')
 var azureStorageName = toLower('${aiServices}${uniqueSuffix}storage')
+var containerRegistryName = toLower('${aiServices}${uniqueSuffix}acr')
 
 // Check if existing resources have been passed in
 var storagePassedIn = azureStorageAccountResourceId != ''
@@ -234,6 +241,8 @@ module vnet 'modules-network-secured/network-agent-vnet.bicep' = {
     agentSubnetPrefix: agentSubnetPrefix
     peSubnetPrefix: peSubnetPrefix
     mcpSubnetPrefix: mcpSubnetPrefix
+    containerAppsSubnetName: containerAppsSubnetName
+    containerAppsSubnetPrefix: containerAppsSubnetPrefix
     existingVnetSubscriptionId: vnetSubscriptionId
     routeTableId: enableHubSpoke ? spoke1RouteTable.outputs.routeTableId : ''
   }
@@ -293,6 +302,7 @@ module aiDependencies 'modules-network-secured/standard-dependent-resources.bice
     // Cosmos DB Account
     cosmosDBResourceId: azureCosmosDBAccountResourceId
     cosmosDBExists: validateExistingResources.outputs.cosmosDBExists
+    containerRegistryName: containerRegistryName
   }
 }
 
@@ -327,6 +337,7 @@ module privateEndpointAndDNS 'modules-network-secured/private-endpoint-and-dns.b
     aiSearchName: aiDependencies.outputs.aiSearchName // AI Search to secure
     storageName: aiDependencies.outputs.azureStorageName // Storage to secure
     cosmosDBName: aiDependencies.outputs.cosmosDBName
+    containerRegistryName: aiDependencies.outputs.containerRegistryName
     fabricWorkspaceResourceId: fabricWorkspaceResourceId // Microsoft Fabric workspace (optional)
     vnetName: vnet.outputs.virtualNetworkName // VNet containing subnets
     peSubnetName: vnet.outputs.peSubnetName // Subnet for private endpoints
@@ -593,4 +604,45 @@ module spoke2FlowLog 'modules-network-secured/vnet-flow-log.bicep' = if (enableH
     networkWatcherName: enableHubSpoke ? hubVnet.outputs.networkWatcherName : ''
   }
   dependsOn: [hubVnet, spoke2Vnet]
+}
+
+// ==============================================================================
+// Container Apps Environment (Dedicated) + MCP Server
+// ==============================================================================
+
+// ---- Container Apps Environment + ACR + Managed Identity ----
+module containerAppsEnv 'modules-network-secured/container-apps-env.bicep' = if (enableHubSpoke) {
+  name: 'container-apps-env-${uniqueSuffix}-deployment'
+  params: {
+    location: location
+    suffix: uniqueSuffix
+    containerAppsSubnetId: vnet.outputs.containerAppsSubnetId
+    logAnalyticsCustomerId: enableHubSpoke ? hubVnet.outputs.logAnalyticsCustomerId : ''
+  }
+  dependsOn: [
+    hubVnet
+    vnet
+    peeringHubToSpoke1
+    peeringSpoke1ToHub
+  ]
+}
+
+// ---- MCP Server Container App ----
+// NOTE: Before deploying this module, import the container image into ACR:
+//   az acr import --name <acrName> \
+//     --source retrievaltestacr.azurecr.io/multi-auth-mcp/api-multi-auth-mcp-env:latest \
+//     --image multi-auth-mcp:latest
+module mcpContainerApp 'modules-network-secured/container-app-mcp.bicep' = if (enableHubSpoke) {
+  name: 'mcp-container-app-${uniqueSuffix}-deployment'
+  params: {
+    location: location
+    suffix: uniqueSuffix
+    containerAppsEnvId: enableHubSpoke ? containerAppsEnv.outputs.containerAppsEnvId : ''
+    acrLoginServer: enableHubSpoke ? containerAppsEnv.outputs.acrLoginServer : ''
+    mcpIdentityId: enableHubSpoke ? containerAppsEnv.outputs.mcpIdentityId : ''
+    mcpIdentityClientId: enableHubSpoke ? containerAppsEnv.outputs.mcpIdentityClientId : ''
+  }
+  dependsOn: [
+    containerAppsEnv
+  ]
 }

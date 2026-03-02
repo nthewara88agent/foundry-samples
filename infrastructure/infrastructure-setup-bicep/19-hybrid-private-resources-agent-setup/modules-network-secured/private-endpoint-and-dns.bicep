@@ -573,3 +573,75 @@ resource fabricDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups
     (fabricPassedIn && empty(fabricDnsZoneRG)) ? fabricLink : null
   ]
 }
+
+/* -------------------------------------------- Azure Container Registry Private Endpoint -------------------------------------------- */
+
+@description('Name of the Azure Container Registry')
+param containerRegistryName string
+
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  name: containerRegistryName
+  scope: resourceGroup()
+}
+
+resource acrPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
+  name: '${containerRegistryName}-private-endpoint'
+  location: resourceGroup().location
+  properties: {
+    subnet: { id: peSubnet.id }
+    privateLinkServiceConnections: [
+      {
+        name: '${containerRegistryName}-private-link-service-connection'
+        properties: {
+          privateLinkServiceId: containerRegistry.id
+          groupIds: ['registry']
+        }
+      }
+    ]
+  }
+}
+
+/* -------------------------------------------- ACR Private DNS Zone -------------------------------------------- */
+
+var acrDnsZoneName = 'privatelink.azurecr.io'
+
+resource acrPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: acrDnsZoneName
+  location: 'global'
+}
+
+resource acrDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
+  parent: acrPrivateDnsZone
+  location: 'global'
+  name: 'acr-${suffix}-link'
+  properties: {
+    virtualNetwork: { id: vnet.id }
+    registrationEnabled: false
+  }
+}
+
+@batchSize(1)
+resource acrAdditionalLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [
+  for (vnetId, i) in additionalVnetIds: {
+    parent: acrPrivateDnsZone
+    location: 'global'
+    name: 'acr-${suffix}-addl-${i}'
+    properties: {
+      virtualNetwork: { id: vnetId }
+      registrationEnabled: false
+    }
+  }
+]
+
+resource acrDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
+  parent: acrPrivateEndpoint
+  name: '${containerRegistryName}-dns-group'
+  properties: {
+    privateDnsZoneConfigs: [
+      { name: '${containerRegistryName}-dns-config', properties: { privateDnsZoneId: acrPrivateDnsZone.id } }
+    ]
+  }
+  dependsOn: [
+    acrDnsLink
+  ]
+}

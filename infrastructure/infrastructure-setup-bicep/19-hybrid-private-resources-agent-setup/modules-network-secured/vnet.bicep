@@ -41,6 +41,9 @@ param peSubnetPrefix string = ''
 @description('Address prefix for the MCP subnet')
 param mcpSubnetPrefix string = ''
 
+@description('Route table resource ID to attach to agent and mcp subnets (optional)')
+param routeTableId string = ''
+
 var defaultVnetAddressPrefix = '192.168.0.0/16'
 var vnetAddress = empty(vnetAddressPrefix) ? defaultVnetAddressPrefix : vnetAddressPrefix
 var agentSubnet = empty(agentSubnetPrefix) ? cidrSubnet(vnetAddress, 24, 0) : agentSubnetPrefix
@@ -61,6 +64,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
         name: agentSubnetName
         properties: {
           addressPrefix: agentSubnet
+          routeTable: !empty(routeTableId) ? { id: routeTableId } : null
           delegations: [
             {
               name: 'Microsoft.app/environments'
@@ -81,6 +85,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
         name: mcpSubnetName
         properties: {
           addressPrefix: mcpSubnet
+          routeTable: !empty(routeTableId) ? { id: routeTableId } : null
           delegations: [
             {
               name: 'Microsoft.App/environments'

@@ -68,6 +68,21 @@
     "projectCapHost": {
       "value": ""
     },
+    "enableHubSpoke": {
+      "value": true
+    },
+    "hubVnetName": {
+      "value": "hub-vnet"
+    },
+    "spoke2VnetName": {
+      "value": "spoke2-vnet"
+    },
+    "vmAdminUsername": {
+      "value": "azureuser"
+    },
+    "vmSshPublicKey": {
+      "value": ""
+    },
     "existingDnsZones": {
       "value": {
         "privatelink.services.ai.azure.com": "",

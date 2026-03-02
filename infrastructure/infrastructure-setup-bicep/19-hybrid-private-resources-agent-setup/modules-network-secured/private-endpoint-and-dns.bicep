@@ -75,6 +75,9 @@ param existingDnsZones object = {
   'privatelink.fabric.microsoft.com': ''
 }
 
+@description('Additional VNet IDs to link to private DNS zones (e.g., hub VNet, spoke2 VNet)')
+param additionalVnetIds array = []
+
 // ---- Resource references ----
 resource aiAccount 'Microsoft.CognitiveServices/accounts@2023-05-01' existing = {
   name: aiAccountName
@@ -408,6 +411,100 @@ resource fabricLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-
     registrationEnabled: false
   }
 }
+
+// ---- Additional VNet Links (Hub, Spoke2, etc.) ----
+// Link all DNS zones to additional VNets so resources in those VNets can resolve private endpoints
+
+@batchSize(1)
+resource aiServicesAdditionalLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [
+  for (vnetId, i) in additionalVnetIds: if (empty(aiServicesDnsZoneRG)) {
+    parent: aiServicesPrivateDnsZone
+    location: 'global'
+    name: 'aiServices-${suffix}-addl-${i}'
+    properties: {
+      virtualNetwork: { id: vnetId }
+      registrationEnabled: false
+    }
+  }
+]
+
+@batchSize(1)
+resource openAiAdditionalLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [
+  for (vnetId, i) in additionalVnetIds: if (empty(openAiDnsZoneRG)) {
+    parent: openAiPrivateDnsZone
+    location: 'global'
+    name: 'openAi-${suffix}-addl-${i}'
+    properties: {
+      virtualNetwork: { id: vnetId }
+      registrationEnabled: false
+    }
+  }
+]
+
+@batchSize(1)
+resource cognitiveServicesAdditionalLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [
+  for (vnetId, i) in additionalVnetIds: if (empty(cognitiveServicesDnsZoneRG)) {
+    parent: cognitiveServicesPrivateDnsZone
+    location: 'global'
+    name: 'cogServ-${suffix}-addl-${i}'
+    properties: {
+      virtualNetwork: { id: vnetId }
+      registrationEnabled: false
+    }
+  }
+]
+
+@batchSize(1)
+resource aiSearchAdditionalLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [
+  for (vnetId, i) in additionalVnetIds: if (empty(aiSearchDnsZoneRG)) {
+    parent: aiSearchPrivateDnsZone
+    location: 'global'
+    name: 'aiSearch-${suffix}-addl-${i}'
+    properties: {
+      virtualNetwork: { id: vnetId }
+      registrationEnabled: false
+    }
+  }
+]
+
+@batchSize(1)
+resource storageAdditionalLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [
+  for (vnetId, i) in additionalVnetIds: if (empty(storageDnsZoneRG)) {
+    parent: storagePrivateDnsZone
+    location: 'global'
+    name: 'storage-${suffix}-addl-${i}'
+    properties: {
+      virtualNetwork: { id: vnetId }
+      registrationEnabled: false
+    }
+  }
+]
+
+@batchSize(1)
+resource cosmosDBAdditionalLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [
+  for (vnetId, i) in additionalVnetIds: if (empty(cosmosDBDnsZoneRG)) {
+    parent: cosmosDBPrivateDnsZone
+    location: 'global'
+    name: 'cosmosDB-${suffix}-addl-${i}'
+    properties: {
+      virtualNetwork: { id: vnetId }
+      registrationEnabled: false
+    }
+  }
+]
+
+@batchSize(1)
+resource fabricAdditionalLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [
+  for (vnetId, i) in additionalVnetIds: if (fabricPassedIn && empty(fabricDnsZoneRG)) {
+    parent: fabricPrivateDnsZone
+    location: 'global'
+    name: 'fabric-${suffix}-addl-${i}'
+    properties: {
+      virtualNetwork: { id: vnetId }
+      registrationEnabled: false
+    }
+  }
+]
 
 // ---- DNS Zone Groups ----
 resource aiServicesDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {

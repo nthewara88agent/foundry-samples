@@ -34,6 +34,9 @@ param peSubnetPrefix string = ''
 @description('Address prefix for the MCP subnet')
 param mcpSubnetPrefix string = ''
 
+@description('Route table resource ID to attach to agent and mcp subnets (optional)')
+param routeTableId string = ''
+
 // Create new VNet if needed
 module newVNet 'vnet.bicep' = if (!useExistingVnet) {
   name: 'vnet-deployment'
@@ -47,6 +50,7 @@ module newVNet 'vnet.bicep' = if (!useExistingVnet) {
     agentSubnetPrefix: agentSubnetPrefix
     peSubnetPrefix: peSubnetPrefix
     mcpSubnetPrefix: mcpSubnetPrefix
+    routeTableId: routeTableId
   }
 }
 

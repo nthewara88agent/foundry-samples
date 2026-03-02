@@ -64,3 +64,11 @@ param dnsZoneNames = [
 param vnetAddressPrefix = ''
 param agentSubnetPrefix = ''
 param peSubnetPrefix = ''
+
+// Hub-Spoke Network Topology
+param enableHubSpoke = true
+param hubVnetName = 'hub-vnet'
+param spoke2VnetName = 'spoke2-vnet'
+param vmAdminUsername = 'azureuser'
+// SECURITY: Provide your SSH public key at deploy time — do NOT hardcode here
+param vmSshPublicKey = ''

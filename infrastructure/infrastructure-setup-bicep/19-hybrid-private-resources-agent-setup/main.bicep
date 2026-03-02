@@ -173,7 +173,53 @@ var trimVnetName = trim(existingVnetName)
 @description('The name of the project capability host to be created')
 param projectCapHost string = 'caphostproj'
 
-// Create Virtual Network and Subnets
+// ---- Hub-Spoke Network Parameters ----
+@description('Enable hub-spoke network topology with Azure Firewall')
+param enableHubSpoke bool = true
+
+@description('Hub VNet name')
+param hubVnetName string = 'hub-vnet'
+
+@description('Spoke2 VNet name')
+param spoke2VnetName string = 'spoke2-vnet'
+
+@description('VM admin username for spoke2 jumpbox')
+param vmAdminUsername string = 'azureuser'
+
+@secure()
+@description('SSH public key for the jumpbox VM. Must be provided at deploy time when enableHubSpoke is true.')
+param vmSshPublicKey string = ''
+
+// ---- Hub VNet ----
+module hubVnet 'modules-network-secured/hub-vnet.bicep' = if (enableHubSpoke) {
+  name: 'hub-vnet-${uniqueSuffix}-deployment'
+  params: {
+    location: location
+    suffix: uniqueSuffix
+    hubVnetName: hubVnetName
+  }
+}
+
+// ---- Route Tables ----
+module spoke1RouteTable 'modules-network-secured/route-table.bicep' = if (enableHubSpoke) {
+  name: 'spoke1-rt-${uniqueSuffix}-deployment'
+  params: {
+    location: location
+    routeTableName: 'spoke1-rt'
+    firewallPrivateIp: enableHubSpoke ? hubVnet.outputs.firewallPrivateIp : '0.0.0.0'
+  }
+}
+
+module spoke2RouteTable 'modules-network-secured/route-table.bicep' = if (enableHubSpoke) {
+  name: 'spoke2-rt-${uniqueSuffix}-deployment'
+  params: {
+    location: location
+    routeTableName: 'spoke2-rt'
+    firewallPrivateIp: enableHubSpoke ? hubVnet.outputs.firewallPrivateIp : '0.0.0.0'
+  }
+}
+
+// Create Virtual Network and Subnets (Spoke 1)
 module vnet 'modules-network-secured/network-agent-vnet.bicep' = {
   name: 'vnet-${trimVnetName}-${uniqueSuffix}-deployment'
   params: {
@@ -189,6 +235,7 @@ module vnet 'modules-network-secured/network-agent-vnet.bicep' = {
     peSubnetPrefix: peSubnetPrefix
     mcpSubnetPrefix: mcpSubnetPrefix
     existingVnetSubscriptionId: vnetSubscriptionId
+    routeTableId: enableHubSpoke ? spoke1RouteTable.outputs.routeTableId : ''
   }
 }
 
@@ -293,6 +340,9 @@ module privateEndpointAndDNS 'modules-network-secured/private-endpoint-and-dns.b
     storageAccountResourceGroupName: azureStorageResourceGroupName // Resource Group for Storage Account
     storageAccountSubscriptionId: azureStorageSubscriptionId // Subscription ID for Storage Account
     existingDnsZones: existingDnsZones
+    additionalVnetIds: enableHubSpoke
+      ? [hubVnet.outputs.hubVnetId, spoke2Vnet.outputs.spoke2VnetId]
+      : []
   }
   dependsOn: [
     aiSearch // Ensure AI Search exists
@@ -435,4 +485,112 @@ module cosmosContainerRoleAssignments 'modules-network-secured/cosmos-container-
     addProjectCapabilityHost
     storageContainersRoleAssignment
   ]
+}
+
+// ==============================================================================
+// Hub-Spoke Network Topology (conditional on enableHubSpoke)
+// ==============================================================================
+
+// ---- Spoke 2 VNet + Jumpbox ----
+module spoke2Vnet 'modules-network-secured/spoke2-vnet.bicep' = if (enableHubSpoke) {
+  name: 'spoke2-vnet-${uniqueSuffix}-deployment'
+  params: {
+    location: location
+    suffix: uniqueSuffix
+    spoke2VnetName: spoke2VnetName
+    routeTableId: enableHubSpoke ? spoke2RouteTable.outputs.routeTableId : ''
+    vmAdminUsername: vmAdminUsername
+    vmSshPublicKey: vmSshPublicKey
+  }
+}
+
+// ---- VNet Peering: Hub <-> Spoke1 ----
+module peeringHubToSpoke1 'modules-network-secured/vnet-peering.bicep' = if (enableHubSpoke) {
+  name: 'peering-hub-to-spoke1-${uniqueSuffix}'
+  params: {
+    localVnetName: hubVnetName
+    remoteVnetName: vnet.outputs.virtualNetworkName
+    remoteVnetId: vnet.outputs.virtualNetworkId
+    allowGatewayTransit: true
+    useRemoteGateways: false
+  }
+  dependsOn: [hubVnet, vnet]
+}
+
+module peeringSpoke1ToHub 'modules-network-secured/vnet-peering.bicep' = if (enableHubSpoke) {
+  name: 'peering-spoke1-to-hub-${uniqueSuffix}'
+  params: {
+    localVnetName: vnet.outputs.virtualNetworkName
+    remoteVnetName: hubVnetName
+    remoteVnetId: enableHubSpoke ? hubVnet.outputs.hubVnetId : ''
+    allowGatewayTransit: false
+    useRemoteGateways: false
+  }
+  dependsOn: [hubVnet, vnet]
+}
+
+// ---- VNet Peering: Hub <-> Spoke2 ----
+module peeringHubToSpoke2 'modules-network-secured/vnet-peering.bicep' = if (enableHubSpoke) {
+  name: 'peering-hub-to-spoke2-${uniqueSuffix}'
+  params: {
+    localVnetName: hubVnetName
+    remoteVnetName: spoke2VnetName
+    remoteVnetId: enableHubSpoke ? spoke2Vnet.outputs.spoke2VnetId : ''
+    allowGatewayTransit: true
+    useRemoteGateways: false
+  }
+  dependsOn: [hubVnet, spoke2Vnet]
+}
+
+module peeringSpoke2ToHub 'modules-network-secured/vnet-peering.bicep' = if (enableHubSpoke) {
+  name: 'peering-spoke2-to-hub-${uniqueSuffix}'
+  params: {
+    localVnetName: spoke2VnetName
+    remoteVnetName: hubVnetName
+    remoteVnetId: enableHubSpoke ? hubVnet.outputs.hubVnetId : ''
+    allowGatewayTransit: false
+    useRemoteGateways: false
+  }
+  dependsOn: [hubVnet, spoke2Vnet]
+}
+
+// ---- Azure Bastion (Developer SKU) on Hub ----
+module bastion 'modules-network-secured/bastion.bicep' = if (enableHubSpoke) {
+  name: 'bastion-${uniqueSuffix}-deployment'
+  params: {
+    location: location
+    suffix: uniqueSuffix
+    hubVnetId: enableHubSpoke ? hubVnet.outputs.hubVnetId : ''
+  }
+  dependsOn: [hubVnet]
+}
+
+// ---- VNet Flow Logs: Spoke1 ----
+module spoke1FlowLog 'modules-network-secured/vnet-flow-log.bicep' = if (enableHubSpoke) {
+  name: 'flowlog-spoke1-${uniqueSuffix}'
+  params: {
+    location: location
+    flowLogName: 'fl-spoke1-${uniqueSuffix}'
+    targetVnetId: vnet.outputs.virtualNetworkId
+    storageAccountId: enableHubSpoke ? hubVnet.outputs.flowLogStorageId : ''
+    logAnalyticsWorkspaceId: enableHubSpoke ? hubVnet.outputs.logAnalyticsWorkspaceId : ''
+    logAnalyticsCustomerId: enableHubSpoke ? hubVnet.outputs.logAnalyticsCustomerId : ''
+    networkWatcherName: enableHubSpoke ? hubVnet.outputs.networkWatcherName : ''
+  }
+  dependsOn: [hubVnet, vnet]
+}
+
+// ---- VNet Flow Logs: Spoke2 ----
+module spoke2FlowLog 'modules-network-secured/vnet-flow-log.bicep' = if (enableHubSpoke) {
+  name: 'flowlog-spoke2-${uniqueSuffix}'
+  params: {
+    location: location
+    flowLogName: 'fl-spoke2-${uniqueSuffix}'
+    targetVnetId: enableHubSpoke ? spoke2Vnet.outputs.spoke2VnetId : ''
+    storageAccountId: enableHubSpoke ? hubVnet.outputs.flowLogStorageId : ''
+    logAnalyticsWorkspaceId: enableHubSpoke ? hubVnet.outputs.logAnalyticsWorkspaceId : ''
+    logAnalyticsCustomerId: enableHubSpoke ? hubVnet.outputs.logAnalyticsCustomerId : ''
+    networkWatcherName: enableHubSpoke ? hubVnet.outputs.networkWatcherName : ''
+  }
+  dependsOn: [hubVnet, spoke2Vnet]
 }

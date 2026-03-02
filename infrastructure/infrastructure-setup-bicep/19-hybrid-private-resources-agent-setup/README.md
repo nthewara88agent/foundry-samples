@@ -1,8 +1,49 @@
 # Hybrid Private Resources Agent Setup
 
-This template deploys an Azure AI Foundry account with backend resources (AI Search, Cosmos DB, Storage) on **private endpoints**. By default, the Foundry resource itself also has **public network access disabled**, but this can be switched to public access if needed (see [Switching Between Private and Public Access](#switching-between-private-and-public-access)).
+This template deploys an Azure AI Foundry account with backend resources (AI Search, Cosmos DB, Storage) on **private endpoints**, wrapped in an optional **hub-spoke network topology** with Azure Firewall, centralized logging, and a jumpbox VM.
 
-## Architecture (Default — Private Foundry)
+## Hub-Spoke Architecture (enableHubSpoke = true)
+
+```
+                          ┌──────────────────────────────────────────┐
+                          │            Hub VNet (10.0.0.0/16)        │
+                          │                                          │
+                          │  ┌──────────────┐  ┌─────────────────┐  │
+                          │  │ Azure Firewall│  │ Azure Bastion   │  │
+                          │  │ (Standard)    │  │ (Developer SKU) │  │
+                          │  │ + Diagnostics │  │                 │  │
+                          │  │ → Log Analyti │  └─────────────────┘  │
+                          │  └──────┬───────┘                        │
+                          │         │ UDR 0.0.0.0/0                  │
+                          │  ┌──────┴───────┐                        │
+                          │  │ Log Analytics │  ┌─────────────────┐  │
+                          │  │ Workspace     │  │ Flow Log Storage│  │
+                          │  └──────────────┘  └─────────────────┘  │
+                          └──────────┬──────────────┬────────────────┘
+                             Peering │              │ Peering
+                    ┌────────────────▼──┐   ┌──────▼─────────────────┐
+                    │ Spoke1 (10.1.0.0) │   │ Spoke2 (10.2.0.0/16)  │
+                    │ AI Foundry VNet    │   │                        │
+                    │                    │   │  ┌──────────────────┐  │
+                    │ agent-subnet /24   │   │  │ Linux Jumpbox VM │  │
+                    │ pe-subnet    /24   │   │  │ (Ubuntu 24.04)   │  │
+                    │ mcp-subnet   /24   │   │  │ SSH key auth     │  │
+                    │                    │   │  └──────────────────┘  │
+                    │ ┌───────────────┐  │   │  default-subnet /24   │
+                    │ │ Private EPs   │  │   └────────────────────────┘
+                    │ │ AI Search     │  │
+                    │ │ Cosmos DB     │  │   VNet Flow Logs on ALL 3 VNets
+                    │ │ Storage       │  │   Private DNS linked to ALL VNets
+                    │ └───────────────┘  │
+                    └────────────────────┘
+
+Firewall Policy:
+  • Network rules: Allow RFC1918 ↔ RFC1918
+  • Application rules: Allow HTTP/HTTPS outbound from spokes
+  • All diagnostic logs → Log Analytics
+```
+
+## Architecture (Default — Without Hub-Spoke)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -185,6 +226,40 @@ Then configure private DNS zone for Container Apps (see TESTING-GUIDE.md Step 6.
 | `agentSubnetName` | Subnet for AI Foundry (reserved) | `agent-subnet` |
 | `peSubnetName` | Subnet for private endpoints | `pe-subnet` |
 | `mcpSubnetName` | Subnet for MCP servers | `mcp-subnet` |
+| `enableHubSpoke` | Enable hub-spoke topology with Azure Firewall | `true` |
+| `hubVnetName` | Hub VNet name | `hub-vnet` |
+| `spoke2VnetName` | Spoke2 VNet name | `spoke2-vnet` |
+| `vmAdminUsername` | Jumpbox VM admin username | `azureuser` |
+| `vmSshPublicKey` | SSH public key for jumpbox (**required when enableHubSpoke=true**) | `''` |
+
+## Hub-Spoke Deployment
+
+When `enableHubSpoke` is true, the template additionally deploys:
+
+- **Hub VNet** with Azure Firewall (Standard SKU), Firewall Policy, and Bastion (Developer SKU)
+- **Spoke2 VNet** with a Linux jumpbox VM (Ubuntu 24.04 LTS, Standard_B2s)
+- **VNet peering** between hub ↔ spoke1, hub ↔ spoke2
+- **UDRs** routing 0.0.0.0/0 through Azure Firewall on spoke subnets
+- **Private DNS zone links** to all three VNets
+- **Log Analytics Workspace** with full Firewall diagnostics
+- **VNet Flow Logs** with traffic analytics on all three VNets
+
+### Security Notes
+
+- The jumpbox VM uses SSH key authentication only — **no passwords**
+- Provide your SSH public key via the `vmSshPublicKey` parameter at deploy time
+- Access the jumpbox via Azure Bastion (Developer SKU) — no public IP on the VM
+- All spoke traffic is forced through Azure Firewall via UDR
+
+```bash
+# Deploy with hub-spoke (provide SSH key)
+az deployment group create \
+  --resource-group "rg-hybrid-agent-test" \
+  --template-file main.bicep \
+  --parameters main.bicepparam \
+  --parameters vmSshPublicKey="$(cat ~/.ssh/id_rsa.pub)" \
+  --parameters location="australiaeast"
+```
 
 ## Cleanup
 
